@@ -1,0 +1,67 @@
+#!/any/shebang/fnscript
+
+// Function running before the rest
+pre fn() {
+    // Global variable
+    pub let config: {source: Path, sync: Path} = load_config("sync_config.toml")?;
+}
+// 
+// // Gets executed before help
+// pre(help) fn() {
+// pub let config: {source: Path, sync: Path} = load_config("sync_config.toml");
+// pub let config_path = config_path("sync_config.toml");
+// }
+// 
+// // pub functions are subcommands so `filename sync <path>` will call this function
+// // Doc comments are displayed when calling help (Look at that perfecly readable string expansion)
+// ////
+// /// Moves and links a config from {if config {config.source} else {"`source` configured via {config_path}"}}
+// /// to {if config {config.sync} else {"`sync` configured via {config_path}"}}.
+// pub fn sync(path: String in sys::ls(config.from_dir)) {
+// move_and_link(config.source, config.sync, path)?;
+// 
+// "Started syncing of {path} from {config.source + path} at {config.sync + path}"
+// }
+// 
+// // the `sys::ls(config.from_dir)` restricts the input to the terms returned by ls
+// /// Links a config from {if config {config.sync} else {"`sync` configured via {config_path}"}}
+// /// back to {if config {config.source} else {"`source` configured via {config_path}"}}.
+// pub fn load(path: sys::ls(config.from_dir)) {
+// move_and_link(config.to_dir, config.from_dir, path)?;
+// 
+// "Loaded config of {path} from {config.sync + path} to {config.source + path}";
+// }
+// 
+// // non pub functions are only availible in this file (maybe when this file is imported as well :-?)
+// // even though this function takes a Path, you can call it with a string and it will make it a Path
+// fn move_and_link(from: Path, to: Path, file: String) {
+// // Adding a path and a string together will always add a path seperator in between if needed
+// let source = from + file;
+// let target = to + file;
+// if target.exists() {
+//     return Err("Config at {target} already exists");
+// }
+// 
+// if !source.exists() {
+//     return Err("Config at {source} does not exist");
+// }
+// 
+// // system commands like mv/ln/mkdir etc. can be called like functions (not sure about the flags yet)
+// sys::mkdir("-r", target.parent())?;
+// 
+// // the question mark behaves like in rust, returning the error.
+// // should you want to ignore the error and don't get 
+// sys::mv(source, target)?;
+// sys::ln("-s", target, source)?;
+// 
+// 
+// sys::cat("file")
+// |> sys::grep("needle")
+// |e> sys::less()
+// |oe> sys::less();
+// 
+// sys::cat("file")
+// pipe sys::grep("needle")
+// pipe_err sys::less()
+// pipe_all sys::less();
+// }

@@ -2,7 +2,7 @@ if exists("b:current_syntax")
     finish
 endif
 
-syn keyword Visibility          pre post pub hidden
+syn keyword Visibility          pre post pub hid
 syn keyword Definition          fn nextgroup=FunctionName skipwhite skipempty
 syn keyword Definition          let
 syn keyword Exit                break return continue exit fail
