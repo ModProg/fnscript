@@ -1,5 +1,5 @@
 mod parser;
-pub use parser::parse_script;
+// pub use parser::parse_script;
 
 mod tokenizer;
 

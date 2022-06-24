@@ -1,7 +1,10 @@
 use std::borrow::Cow;
 
-use logos::{FilterResult, Lexer, Logos};
+use logos::{FilterResult, Logos};
+use rustc_lexer::unescape::{unescape_raw_str, unescape_str, EscapeError};
 use unicode_normalization::UnicodeNormalization;
+
+type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 
 #[derive(Logos, Debug, PartialEq)]
 pub enum Token<'source> {
@@ -9,6 +12,20 @@ pub enum Token<'source> {
     #[regex(r"(\p{XID_START}|_)\p{XID_CONTINUE}*", |l|l.slice().nfc().collect::<Cow<str>>())]
     Ident(Cow<'source, str>),
 
+    // Literals
+    #[regex(r#""(\\\\|\\"|[^"])*""#, string)]
+    #[regex(r#"'(\\\\|\\'|[^'])*'"#, string)]
+    String(String),
+
+    #[regex(r#"r#*""#, raw_string)]
+    #[regex(r#"r#*'"#, raw_string)]
+    RawString(String),
+
+    #[regex(r"0[xob]_*[0-9][0-9_]*", prefixed_int)]
+    #[regex(r"[0-9][0-9_]*(.[0-9][0-9_]*)?([Ee][+-]?_*[0-9][0-9]*)?", |lex|lex.slice().replace('_', "").parse())]
+    Number(f64),
+
+    // brackets
     #[token("{")]
     BraceOpen,
     #[token("}")]
@@ -21,15 +38,184 @@ pub enum Token<'source> {
     BracketOpen,
     #[token("]")]
     BracketClose,
+
+    // Symbols
+    #[token(";")]
+    Semi,
+    #[token(",")]
+    Comma,
+    #[token(".")]
+    Dot,
+    #[token("..")]
+    RangeSep,
+    #[token("..=")]
+    InklRangeSep,
+    #[token("?")]
+    Question,
     #[token(":")]
     Colon,
+    #[token("::")]
+    PathSep,
     #[token("=")]
+    Assign,
+    #[token("==")]
     Eq,
+    #[token("!=")]
+    NotEq,
+    #[token("!")]
+    Bang,
+    #[token("<")]
+    Lt,
+    #[token("<=")]
+    LtEq,
+    #[token(">")]
+    Gt,
+    #[token(">=")]
+    GtEq,
+    #[token("->")]
+    Arrow,
+    #[token("-")]
+    Minus,
+    #[token("&&")]
+    And,
+    #[token("&&=")]
+    AndAssign,
+    #[token("||")]
+    Or,
+    #[token("||=")]
+    OrAssign,
+    #[token("+")]
+    Plus,
+    #[token("+=")]
+    PlusAssign,
+    #[token("*")]
+    Mul,
+    #[token("*=")]
+    MulAssign,
+    #[token("/")]
+    Div,
+    #[token("/=")]
+    DivAssign,
+    #[token("^")]
+    Exp,
+    #[token("^=")]
+    ExpAssign,
+    #[token("%")]
+    Mod,
+    #[token("%=")]
+    ModAssign,
+
+    #[regex(r"\|(o|e|oe|eo)>")]
+    Pipe,
+
+    #[regex(r"///([^/\n][^\n]*)?\n", doc_comment)]
+    DocComment(&'source str),
+
+    // Ignored and errors
     #[error]
     #[regex(r"\p{Whitespace}", logos::skip)]
     #[regex(r"(//|////)[^\n]*\n", logos::skip)]
     #[regex(r"#![^\n]*\n", |l| if l.span().start == 0 {FilterResult::Skip} else {FilterResult::Error})]
     Error,
+}
+
+fn doc_comment<'source>(l: &mut Lexer<'source>) -> &'source str {
+    let comment = l.slice().trim_start_matches("///").trim_end();
+    comment.strip_prefix(' ').unwrap_or(comment)
+}
+
+// TODO should be Cow
+fn string(l: &mut Lexer) -> String {
+    let string = l.slice();
+    let str = string.get(1..string.len() - 1).expect("quotes are ascii");
+    let mut last_end = 0;
+    let mut string = String::new();
+
+    unescape_str(str, &mut |span, res| match res {
+        Ok(c) => {
+            string.push_str(str.get(last_end..span.start).expect("is in range"));
+            string.push(c);
+            last_end = span.end;
+        }
+        Err(EscapeError::EscapeOnlyChar) if str.get(span.start..span.end) == Some("\"") => (),
+        Err(e) => todo!("Handle String escape errors{e:?}"),
+    });
+
+    string.push_str(
+        str.get(last_end..str.len())
+            .expect("last_end is <= str.len()"),
+    );
+
+    string
+}
+
+fn raw_string(l: &mut Lexer) -> String {
+    let string = l.slice();
+    let quote = string
+        .get(string.len() - 1..string.len())
+        .expect("there is a quote");
+    let pounds = string.len() - 2;
+    let end = quote.to_owned()
+        + string
+            .get(1..string.len() - 1)
+            .expect("pounds inside string");
+    let quote = quote.chars().next().expect("there is a quote");
+
+    let remainder = l.remainder();
+
+    let mut string = None;
+    for (i, c) in remainder.char_indices() {
+        if c == quote
+            && remainder.len() > i + pounds + 1
+            && remainder
+                .get(i..i + pounds + 1)
+                .expect("i stays in bounds - pounds +1 ")
+                == end
+        {
+            string = Some(remainder.get(0..i).expect("i is in bounds"));
+            l.bump(i + pounds + 1);
+            break;
+        }
+    }
+
+    // TODO error handling
+    let str = string.expect("found end");
+
+    let mut last_end = 0;
+    let mut string = String::new();
+
+    unescape_raw_str(str, &mut |span, res| match res {
+        Ok(c) => {
+            string.push_str(str.get(last_end..span.start).expect("is in range"));
+            string.push(c);
+            last_end = span.end;
+        }
+        Err(e) => todo!("Handle String escape errors{e:?}"),
+    });
+
+    string.push_str(
+        str.get(last_end..str.len())
+            .expect("last_end is <= str.len()"),
+    );
+
+    string
+}
+
+fn prefixed_int(l: &mut Lexer) -> Result<f64, std::num::ParseIntError> {
+    let base = l.slice().get(1..2).expect("has base");
+    let remainder = l
+        .slice()
+        .get(2..l.slice().len())
+        .expect("has number")
+        .replace('_', "");
+    let base = match base.to_ascii_lowercase().as_str() {
+        "o" => 8,
+        "x" => 16,
+        "b" => 2,
+        _ => unreachable!("only oxb are bases"),
+    };
+
+    i64::from_str_radix(&remainder, base).map(|i| i as f64)
 }
 
 impl<'source> PartialEq<&str> for Token<'source> {
@@ -41,7 +227,7 @@ impl<'source> PartialEq<&str> for Token<'source> {
     }
 }
 
-pub fn tokenize(input: &str) -> Lexer<Token> {
+pub fn tokenize(input: &str) -> Lexer {
     Token::lexer(input)
 }
 
@@ -50,12 +236,16 @@ mod test {
     use crate::tokenizer::{tokenize, Token};
 
     macro_rules! token_test {
-        {$tokens:ident => Ident($ident:tt) $($tts:tt)*} => {
-            assert_eq!($tokens.next().unwrap(), Token::Ident($ident.into()));
+        // {$tokens:ident => $token:ident($ident:tt) $($tts:tt)*} => {
+        //     assert_eq!($tokens.next().unwrap(), Token::$token($ident.into()));
+        //     token_test!{$tokens => $($tts)*}
+        // };
+        {$tokens:ident => $token:ident($($inner:tt),*) $($tts:tt)*} => {
+            assert_eq!($tokens.next().unwrap(), Token::$token($($inner.into()),*),"`{}` at {:?}", $tokens.slice(), $tokens.span());
             token_test!{$tokens => $($tts)*}
         };
         {$tokens:ident => $token:ident $($tts:tt)*} => {
-            assert_eq!($tokens.next().unwrap(), Token::$token);
+            assert_eq!($tokens.next().unwrap(), Token::$token,"`{}` at {:?}", $tokens.slice(), $tokens.span());
             token_test!{$tokens => $($tts)*}
         };
         {$tokens:ident =>} => {}
@@ -63,36 +253,30 @@ mod test {
 
     #[test]
     fn test() {
-        let mut tokens = tokenize(include_str!("../example.fns"));
+        let mut tokens = tokenize(include_str!("../test/tokenize.fns"));
         token_test! { tokens =>
+            DocComment("Doc comment")
+            DocComment("  - This should be indented")
             Ident("pre") Ident("fn") ParenOpen ParenClose BraceOpen
-                Ident("pub") Ident("let") Ident("config") Colon 
-                BraceOpen Ident("source") Colon Ident("Path") BraceClose
-                Eq Ident("load_config") ParenOpen
+                Ident("pub") Ident("let") Ident("config") Colon BraceOpen
+                    Ident("source") Colon Ident("Path") Comma
+                    Ident("sync") Colon Ident("Path") BraceClose
+                Assign Ident("load_config") ParenOpen String("\\\"\r\t\u{1234}") ParenClose Question Semi
+
+                RawString(r#"\"'\r"#) Semi
+                RawString(r"\r") Semi
+                RawString("H\"") Semi
+                Number(10.4) Semi
+                Number(0x10) Semi
+                Number(0o1_00) Semi
+                Number(0b01_0000) Semi
+                Number(0.1_2) Semi
+                Number(0.1E10) Semi
+                Number(0.1e-10) Semi
+            BraceClose
         }
+        assert!(tokens.next().is_none());
         // assert_eq!(tokens.next().unwrap(), Token::Ident("pre".into()));
         // assert_eq!(tokens.next().unwrap(), Token::Ident("fn".into()));
     }
 }
-
-// pub fn tokenize(input: &str) -> IResult<&str, Vec<Token>> {
-//     many0(delimited(
-//         tuple((space0, opt(comment), space0)),
-//         token,
-//         space0,
-//     ))(input)
-// }
-//
-// fn token(input: &str) -> IResult<&str, Token> {
-//     alt((ident,group,))(input)
-// }
-//
-// fn comment(input: &str) -> IResult<&str, ()> {
-//     if input.starts_with(pat)
-//     let (input, _) = input.split_at_position_complete(|c| c == '\n')?;
-//     Ok((input, ()))
-// }
-//
-// fn space(input: &str) {
-//
-// }

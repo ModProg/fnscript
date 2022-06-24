@@ -13,8 +13,6 @@ repository = "https://github.com/ModProg/fnscript"
 
 [dependencies]
 logos = "0.12.1"
-nom = "7.1.1"
-nom-supreme = "0.8.0"
-nom-unicode = "0.3.0"
+rustc_lexer = "0.1.0"
 unicode-normalization = "0.1.19"
 unicode-xid = "0.2.3"
