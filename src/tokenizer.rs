@@ -15,11 +15,11 @@ pub enum Token<'source> {
     // Literals
     #[regex(r#""(\\\\|\\"|[^"])*""#, string)]
     #[regex(r#"'(\\\\|\\'|[^'])*'"#, string)]
-    String(String),
+    String(Cow<'source, str>),
 
     #[regex(r#"r#*""#, raw_string)]
     #[regex(r#"r#*'"#, raw_string)]
-    RawString(String),
+    RawString(Cow<'source, str>),
 
     #[regex(r"0[xob]_*[0-9][0-9_]*", prefixed_int)]
     #[regex(r"[0-9][0-9_]*(.[0-9][0-9_]*)?([Ee][+-]?_*[0-9][0-9]*)?", |lex|lex.slice().replace('_', "").parse())]
@@ -125,7 +125,7 @@ fn doc_comment<'source>(l: &mut Lexer<'source>) -> &'source str {
 }
 
 // TODO should be Cow
-fn string(l: &mut Lexer) -> String {
+fn string<'source>(l: &mut Lexer<'source>) -> Cow<'source, str> {
     let string = l.slice();
     let str = string.get(1..string.len() - 1).expect("quotes are ascii");
     let mut last_end = 0;
@@ -146,10 +146,10 @@ fn string(l: &mut Lexer) -> String {
             .expect("last_end is <= str.len()"),
     );
 
-    string
+    string.into()
 }
 
-fn raw_string(l: &mut Lexer) -> String {
+fn raw_string<'source>(l: &mut Lexer<'source>) -> Cow<'source, str> {
     let string = l.slice();
     let quote = string
         .get(string.len() - 1..string.len())
@@ -198,7 +198,7 @@ fn raw_string(l: &mut Lexer) -> String {
             .expect("last_end is <= str.len()"),
     );
 
-    string
+    string.into()
 }
 
 fn prefixed_int(l: &mut Lexer) -> Result<f64, std::num::ParseIntError> {
