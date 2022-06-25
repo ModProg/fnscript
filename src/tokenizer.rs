@@ -1,16 +1,75 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::Range};
 
 use logos::{FilterResult, Logos};
 use rustc_lexer::unescape::{unescape_raw_str, unescape_str, EscapeError};
 use unicode_normalization::UnicodeNormalization;
 
-type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
+pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
+pub type TokenStream<'source> = &'source mut TokenBuffer<'source>;
+// #[macro_export]
+// macro_rules! TokenStream {
+//     () => {
+//         std::iter::Peekable<impl Iterator<Item = (Token<'_>, Range<usize>)>>
+//     };
+//     ($lt:lifetime) => {
+//         std::iter::Peekable<impl Iterator<Item = (Token<$lt>, Range<usize>)>>
+//     }
+// }
+pub struct TokenBuffer<'source> {
+    tokens: Vec<(Token<'source>, Range<usize>)>,
+    pub position: usize,
+}
+impl<'source> TokenBuffer<'source> {
+    #[allow(clippy::should_implement_trait)]
+    pub fn next(&mut self) -> Option<&(Token<'source>, Range<usize>)> {
+        if self.position == self.tokens.len() {
+            None
+            // &(Token::EOF, end..end)
+        } else {
+            self.position += 1;
+            Some(&self.tokens[self.position])
+        }
+    }
 
-#[derive(Logos, Debug, PartialEq)]
+    pub fn peek(&self) -> Option<&(Token, Range<usize>)> {
+        self.tokens.get(self.position + 1)
+    }
+
+    pub fn current(&self) -> usize {
+        self.position
+    }
+
+    pub fn reset_to(&mut self, position: usize) {
+        self.position = position
+    }
+}
+
+impl<'source> FromIterator<(Token<'source>, Range<usize>)> for TokenBuffer<'source> {
+    fn from_iter<T: IntoIterator<Item = (Token<'source>, Range<usize>)>>(iter: T) -> Self {
+        TokenBuffer {
+            tokens: iter.into_iter().collect(),
+            position: 0,
+        }
+    }
+}
+
+#[derive(Logos, Debug, PartialEq, Clone)]
 pub enum Token<'source> {
     // TODO Only normalize if necessary
     #[regex(r"(\p{XID_START}|_)\p{XID_CONTINUE}*", |l|l.slice().nfc().collect::<Cow<str>>())]
     Ident(Cow<'source, str>),
+
+    // Keywords
+    #[token("fn")]
+    Fn,
+    #[token("hid")]
+    Hid,
+    #[token("pub")]
+    Pub,
+    #[token("pre")]
+    Pre,
+    #[token("post")]
+    Post,
 
     // Literals
     #[regex(r#""(\\\\|\\"|[^"])*""#, string)]
@@ -117,6 +176,8 @@ pub enum Token<'source> {
     #[regex(r"(//|////)[^\n]*\n", logos::skip)]
     #[regex(r"#![^\n]*\n", |l| if l.span().start == 0 {FilterResult::Skip} else {FilterResult::Error})]
     Error,
+
+    EOF,
 }
 
 fn doc_comment<'source>(l: &mut Lexer<'source>) -> &'source str {
@@ -227,13 +288,13 @@ impl<'source> PartialEq<&str> for Token<'source> {
     }
 }
 
-pub fn tokenize(input: &str) -> Lexer {
-    Token::lexer(input)
+pub fn tokenize(input: &str) -> TokenBuffer {
+    Token::lexer(input).spanned().collect()
 }
 
 #[cfg(test)]
 mod test {
-    use crate::tokenizer::{tokenize, Token};
+    use crate::tokenizer::{Logos, Token};
 
     macro_rules! token_test {
         // {$tokens:ident => $token:ident($ident:tt) $($tts:tt)*} => {
@@ -253,7 +314,7 @@ mod test {
 
     #[test]
     fn test() {
-        let mut tokens = tokenize(include_str!("../test/tokenize.fns"));
+        let mut tokens = Token::lexer(include_str!("../test/tokenize.fns"));
         token_test! { tokens =>
             DocComment("Doc comment")
             DocComment("  - This should be indented")
