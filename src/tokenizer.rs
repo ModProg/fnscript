@@ -15,24 +15,43 @@ pub type TokenStream<'source> = &'source mut TokenBuffer<'source>;
 //         std::iter::Peekable<impl Iterator<Item = (Token<$lt>, Range<usize>)>>
 //     }
 // }
+#[derive(Debug, Clone)]
 pub struct TokenBuffer<'source> {
     tokens: Vec<(Token<'source>, Range<usize>)>,
     pub position: usize,
 }
+
+impl<'source> FromIterator<(Token<'source>, Range<usize>)> for TokenBuffer<'source> {
+    fn from_iter<T: IntoIterator<Item = (Token<'source>, Range<usize>)>>(iter: T) -> Self {
+        Self {
+            tokens: iter.into_iter().collect(),
+            position: 0,
+        }
+    }
+}
+
 impl<'source> TokenBuffer<'source> {
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&(Token<'source>, Range<usize>)> {
-        if self.position == self.tokens.len() {
+        if self.position >= self.tokens.len() {
             None
             // &(Token::EOF, end..end)
         } else {
             self.position += 1;
-            Some(&self.tokens[self.position])
+            Some(&self.tokens[self.position - 1])
         }
     }
 
+    // TODO implement behaviour for none destructive
+    pub fn next_back(&mut self) -> Option<(Token<'source>, Range<usize>)> {
+        self.tokens.pop()
+    }
+    pub fn peek_back(&mut self) -> Option<&(Token<'source>, Range<usize>)> {
+        self.tokens.last()
+    }
+
     pub fn peek(&self) -> Option<&(Token, Range<usize>)> {
-        self.tokens.get(self.position + 1)
+        self.tokens.get(self.position)
     }
 
     pub fn current(&self) -> usize {
@@ -41,15 +60,6 @@ impl<'source> TokenBuffer<'source> {
 
     pub fn reset_to(&mut self, position: usize) {
         self.position = position
-    }
-}
-
-impl<'source> FromIterator<(Token<'source>, Range<usize>)> for TokenBuffer<'source> {
-    fn from_iter<T: IntoIterator<Item = (Token<'source>, Range<usize>)>>(iter: T) -> Self {
-        TokenBuffer {
-            tokens: iter.into_iter().collect(),
-            position: 0,
-        }
     }
 }
 
@@ -62,6 +72,10 @@ pub enum Token<'source> {
     // Keywords
     #[token("fn")]
     Fn,
+    #[token("let")]
+    Let,
+    #[token("in")]
+    In,
     #[token("hid")]
     Hid,
     #[token("pub")]
@@ -116,9 +130,9 @@ pub enum Token<'source> {
     #[token("::")]
     PathSep,
     #[token("=")]
-    Assign,
-    #[token("==")]
     Eq,
+    #[token("==")]
+    EqEq,
     #[token("!=")]
     NotEq,
     #[token("!")]
@@ -148,7 +162,7 @@ pub enum Token<'source> {
     #[token("+=")]
     PlusAssign,
     #[token("*")]
-    Mul,
+    Asterix,
     #[token("*=")]
     MulAssign,
     #[token("/")]
@@ -156,11 +170,11 @@ pub enum Token<'source> {
     #[token("/=")]
     DivAssign,
     #[token("^")]
-    Exp,
+    Carret,
     #[token("^=")]
     ExpAssign,
     #[token("%")]
-    Mod,
+    Percent,
     #[token("%=")]
     ModAssign,
 
@@ -318,11 +332,11 @@ mod test {
         token_test! { tokens =>
             DocComment("Doc comment")
             DocComment("  - This should be indented")
-            Ident("pre") Ident("fn") ParenOpen ParenClose BraceOpen
-                Ident("pub") Ident("let") Ident("config") Colon BraceOpen
+            Pre Fn ParenOpen ParenClose BraceOpen
+                Pub Ident("let") Ident("config") Colon BraceOpen
                     Ident("source") Colon Ident("Path") Comma
                     Ident("sync") Colon Ident("Path") BraceClose
-                Assign Ident("load_config") ParenOpen String("\\\"\r\t\u{1234}") ParenClose Question Semi
+                Eq Ident("load_config") ParenOpen String("\\\"\r\t\u{1234}") ParenClose Question Semi
 
                 RawString(r#"\"'\r"#) Semi
                 RawString(r"\r") Semi
