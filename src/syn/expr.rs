@@ -42,15 +42,23 @@ pub enum Expression {
     Binary(Binary),
 }
 
+impl ToLisp for Expression {
+    fn to_lisp(&self) -> Lisp {
+        use Expression::*;
+        defer!(self; 
+            Variable(v), Lit(v), FunctionCall(v), PostUnary(v), Binary(v) 
+            => lisp!(v))
+    }
+}
+
 impl Expression {
-    fn parse(tokens: &mut TokenStream, precedence: ExpressionPrecedence) -> Result<Self> {
-        use ExpressionPrecedence as Precedence;
-        if let Precedence::Binary(_) = precedence {
-            let current = tokens.current();
+    fn parse(tokens: &mut ParseBuffer, precedence: Precedence) -> Result<Self> {
+        let current = *tokens;
+        if precedence.is_binary() {
             if let Ok(value) = Binary::parse(tokens, precedence) {
                 return Ok(value);
             } else {
-                tokens.reset_to(current);
+                *tokens = current;
             }
         }
         any! {tokens:
@@ -64,33 +72,9 @@ impl Expression {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
-enum ExpressionPrecedence {
-    Lit,
-    Binary(BinaryPrecedence),
-}
-
-impl ExpressionPrecedence {
-    fn next(self) -> Self {
-        use BinaryPrecedence::*;
-        use ExpressionPrecedence::*;
-        match self {
-            Binary(binary) => Binary(match binary {
-                Or => And,
-                And => Compare,
-                Compare => Arithmetic,
-                Arithmetic => Term,
-                Term => return Lit,
-            }),
-            PostUnary => Lit,
-            Lit => Lit,
-        }
-    }
-}
-
 // TODO make sure this is the correct order ARFGG
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
-enum BinaryPrecedence {
+enum Precedence {
     // ||
     Or,
     // &&
@@ -101,26 +85,35 @@ enum BinaryPrecedence {
     Arithmetic,
     // * /
     Term,
-    // Cast,
-    // Eq(Token![==]),
-    // NotEq(Token![!=]),
-    // Lt(Token![<]),
-    // LtEq(Token![<=]),
-    // Gt(Token![>]),
-    // GtEq(Token![>=]),
-    // Minus(Token![-]),
-    // And(Token![&&]),
-    // Or(Token![||]),
-    // Plus(Token![+]),
-    // Mul(Token![*]),
-    // Div(Token![/]),
-    // Exp(Token![^]),
-    // Mod(Token![%]),
+    // !
+    Prefix,
+    // ? ()
+    Postfix,
+    Lit,
+}
+impl Precedence {
+    fn next(&self) -> Precedence {
+        use Precedence::*;
+        match self {
+            Or => And,
+            And => Compare,
+            Compare => Arithmetic,
+            Arithmetic => Term,
+            Term => Prefix,
+            Prefix => Postfix,
+            Postfix => Lit,
+            Lit => unreachable!("What are you doing here"),
+        }
+    }
+
+    fn is_binary(self) -> bool {
+        self < Self::Prefix
+    }
 }
 
 impl Parse for Expression {
-    fn parse(tokens: &mut TokenStream) -> Result<Self> {
-        Expression::parse(tokens, ExpressionPrecedence::Binary(BinaryPrecedence::Or))
+    fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
+        Expression::parse(tokens, Precedence::Or)
     }
 }
 
@@ -130,8 +123,17 @@ pub enum Lit {
     Number(LitNumber),
 }
 
+impl ToLisp for Lit {
+    fn to_lisp(&self) -> Lisp {
+        match self {
+            Lit::String(string) => lisp!(format!("{:?}", string.value)),
+            Lit::Number(number) => lisp!(number.value.to_string())
+        }
+    }
+}
+
 impl Parse for Lit {
-    fn parse(tokens: &mut TokenStream) -> Result<Self> {
+    fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
         use Lit::*;
         any! {tokens:
             String, Number
@@ -148,10 +150,9 @@ pub struct LitStr {
 }
 
 impl Parse for LitStr {
-    fn parse(tokens: &mut TokenStream) -> Result<Self> {
-        expect! {
-            (Token::String(value), span) in tokens =>
-                Ok(Self{value: value.to_string(), span: span.clone()})
+    fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
+        expect! { TokenKind::String(value), span in tokens =>
+                Ok(Self{value: value.to_string(), span: *span})
         }
     }
 }
@@ -163,10 +164,9 @@ pub struct LitNumber {
 }
 
 impl Parse for LitNumber {
-    fn parse(tokens: &mut TokenStream) -> Result<Self> {
-        expect! {
-            (Token::Number(value), span) in tokens =>
-                Ok(Self{value: *value, span: span.clone()})
+    fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
+        expect! { TokenKind::Number(value), span in tokens =>
+                Ok(Self{value: *value, span: *span})
         }
     }
 }
@@ -178,8 +178,15 @@ pub struct FunctionCall {
     args: Vec<Expression>,
 }
 
+impl ToLisp for FunctionCall {
+    fn to_lisp(&self) -> Lisp {
+        let Self { path,  args, .. } = self;
+        lisp![(path args)]
+    }
+}
+
 impl Parse for FunctionCall {
-    fn parse(tokens: &mut TokenStream) -> Result<Self> {
+    fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
         let mut inner;
         Ok(Self {
             path: tokens.parse()?,
@@ -195,24 +202,41 @@ pub struct PostUnary {
     op: PostUnaryOp,
 }
 
+impl ToLisp for PostUnary {
+    fn to_lisp(&self) -> Lisp {
+        let Self{expr, op} = self;
+        lisp![(op expr)]
+    }
+}
+
+#[derive(Debug)]
+pub struct FnCall {
+    span: Span,
+}
+
 impl Parse for PostUnary {
-    fn parse(tokens: &mut TokenStream) -> Result<Self> {
-        let tokens = &mut &mut tokens.clone();
+    fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
         Ok(Self {
             op: {
-                let (token, span) = tokens
-                    .peek_back()
+                let Token { span, kind } = tokens
+                    .next_back()
                     .ok_or_else(|| error!(internal, "Expected end"))?
                     .to_owned();
-                match token {
-                    Token::Question => {
-                        tokens.next_back();
-                        PostUnaryOp::Question(Question { span })
-                    }
+                match kind {
+                    TokenKind::Question => PostUnaryOp::Question(Question { span }),
+                    // TokenKind::ParenClose => {
+                    //     let inner_span = expect!(
+                    //         TokenKind::ParenOpen,
+                    //         inner_span = tokens.next_back() =>
+                    //         inner_span
+                    //     );
+                    //     span.extend(*inner_span);
+                    //     PostUnaryOp::FnCall(FnCall { span })
+                    // }
                     _ => fail!(internal, "not a PostUnary"),
                 }
             },
-            expr: Box::new(Expression::parse(tokens, ExpressionPrecedence::Lit)?),
+            expr: Box::new(Expression::parse(tokens, Precedence::Postfix)?),
         })
     }
 }
@@ -222,9 +246,15 @@ pub enum PostUnaryOp {
     Question(Question),
     Bang(Bang),
 }
+impl ToLisp for PostUnaryOp {
+    fn to_lisp(&self) -> Lisp {
+        use PostUnaryOp::*;
+        defer!(self; Question(v), Bang(v) => lisp!(v))
+    }
+}
 
 impl Parse for PostUnaryOp {
-    fn parse(tokens: &mut TokenStream) -> Result<Self> {
+    fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
         use PostUnaryOp::*;
         any! {tokens:
             Question,
@@ -242,8 +272,15 @@ pub struct Binary {
     rhs: Box<Expression>,
 }
 
+impl ToLisp for Binary {
+    fn to_lisp(&self) -> Lisp {
+        let Self { lhs, op, rhs } = self;
+        lisp![(op lhs rhs)]
+    }
+}
+
 impl Binary {
-    fn parse(tokens: &mut TokenStream, precedence: ExpressionPrecedence) -> Result<Expression> {
+    fn parse(tokens: &mut ParseBuffer, precedence: Precedence) -> Result<Expression> {
         let ops: Vec<_> = iter::once(Ok((None, Expression::parse(tokens, precedence.next())?)))
             .chain(iter::from_fn(|| {
                 tokens.peek().is_some().then(|| {
@@ -292,34 +329,41 @@ pub enum BinaryOp {
     Exp(Token![^]),
     Mod(Token![%]),
 }
+impl ToLisp for BinaryOp {
+    fn to_lisp(&self) -> Lisp {
+        use BinaryOp::*;
+        defer!(self;
+                Eq(v), NotEq(v), Lt(v), LtEq(v), Gt(v), GtEq(v), Minus(v), And(v), Or(v), Plus(v), Mul(v), Div(v), Exp(v), Mod(v)
+                => lisp!(v)
+            )
+    }
+}
 
 impl BinaryOp {
-    fn parse(tokens: &mut TokenStream, precedence: ExpressionPrecedence) -> Result<Self> {
+    fn parse(tokens: &mut ParseBuffer, precedence: Precedence) -> Result<Self> {
         use BinaryOp::*;
         Ok(match precedence {
-            ExpressionPrecedence::Binary(precedence) => match precedence {
-                BinaryPrecedence::Or => Or(tokens.parse()?),
-                BinaryPrecedence::And => And(tokens.parse()?),
-                BinaryPrecedence::Compare => {
-                    any! {tokens:
-                        Eq,NotEq,Lt,LtEq,Gt,GtEq
-                    }
-                    unexpected!(expected Comparison in tokens)
+            Precedence::Or => Or(tokens.parse()?),
+            Precedence::And => And(tokens.parse()?),
+            Precedence::Compare => {
+                any! {tokens:
+                    Eq,NotEq,Lt,LtEq,Gt,GtEq
                 }
-                BinaryPrecedence::Arithmetic => {
-                    any! {tokens:
-                        Plus, Minus
-                    }
-                    unexpected!(expected "`+` or `-`" in tokens)
+                unexpected!(expected Comparison in tokens)
+            }
+            Precedence::Arithmetic => {
+                any! {tokens:
+                    Plus, Minus
                 }
-                BinaryPrecedence::Term => {
-                    any! {tokens:
-                        Mul, Div
-                    }
-                    unexpected!(expected "`*` or `/`" in tokens)
+                unexpected!(expected "`+` or `-`" in tokens)
+            }
+            Precedence::Term => {
+                any! {tokens:
+                    Mul, Div
                 }
-            },
-            _ => unreachable!("Only valid for binary expressions"),
+                unexpected!(expected "`*` or `/`" in tokens)
+            }
+            _ => fail!(internal, "no binary expression"),
         })
     }
 }

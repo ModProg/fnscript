@@ -9,8 +9,14 @@ macro_rules! tokens {
             }
 
             impl $crate::syn::Parse for $name {
-                fn parse(tokens: &mut $crate::tokenizer::TokenStream) -> $crate::syn::Result<Self> {
-                    Ok(Self{span: expect!($crate::tokenizer::Token::$name in tokens).1.clone()})
+                fn parse(tokens: &mut $crate::tokenizer::ParseBuffer) -> $crate::syn::Result<Self> {
+                    Ok(Self{span: expect!($crate::tokenizer::TokenKind::$name, span in tokens => *span)})
+                }
+            }
+
+            impl $crate::syn::lisp::ToLisp for $name {
+                fn to_lisp(&self) -> $crate::syn::lisp::Lisp {
+                    lisp!(stringify!($token))
                 }
             }
         )*
@@ -62,30 +68,28 @@ macro_rules! delimiters {
             }
             impl ParseDelimited for $name {
                 fn parse_delimited<'source>(
-                    tokens: &mut crate::tokenizer::TokenStream<'source>,
-                ) -> super::Result<(Self, crate::tokenizer::TokenBuffer<'source>)> {
-                    let mut inner = Vec::new();
-
-                    let start = expect!($crate::tokenizer::Token::$start in tokens).1.clone();
+                    tokens: &mut crate::tokenizer::ParseBuffer<'source>,
+                ) -> super::Result<(Self, crate::tokenizer::ParseBuffer<'source>)> {
+                    let mut start = expect!($crate::tokenizer::TokenKind::$start, span in tokens => *span);
                     let mut open = 0;
 
-                    let end = loop {
-                        let token = tokens.next();
+                    let end = tokens.tokens.iter().position(|token| {
                         match &token {
-                            Some(($crate::tokenizer::Token::$start, _)) => open += 1,
-                            Some(($crate::tokenizer::Token::$end, span)) if open == 0 => break span,
-                            Some(($crate::tokenizer::Token::$end, _)) => open -= 1,
-                            None => fail!(start, "Missing {} for {}", (stringify!($end)), (stringify!($start))),
+                            $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$start, ..} => open += 1,
+                            $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$end, ..} if open == 0 => return true,
+                            $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$end, ..} => open -= 1,
                             _ => ()
                         }
-                        inner.push(token.cloned().expect("fail on EOF"));
-                    };
+                        false
+                    }).ok_or_else(|| error!(start, "Missing {} for {}", (stringify!($end)), (stringify!($start))))?;
 
-                    Ok((Self{
-                        span: Span{
-                            start:start.start,end:end.end
-                        }
-                    }, inner.into_iter().collect()))
+                    start.extend(tokens.tokens[end].span);
+
+                    let inner = &tokens.tokens[0..end];
+
+                    tokens.tokens = &tokens.tokens[end+1..];
+
+                    Ok((Self{ span: start }, $crate::tokenizer::ParseBuffer{tokens: inner}))
                 }
             }
         )*

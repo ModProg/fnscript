@@ -1,16 +1,24 @@
 #[macro_export]
 macro_rules! expect {
-    ($token:pat in $tokens:ident) => {
-        match $tokens.next() {
-            Some(ret @ ($token, _)) => ret,
+    // ($token:pat in $tokens:ident) => {
+    //     match $tokens.next() {
+    //         Some($token) => ret,
+    //         other => unexpected!(other, expected $token),
+    //         // Some((wrong, span)) => fail!(span, "Expected {} found `{wrong:?}`", (stringify!($($token)?))),
+    //         // _ => fail!(EOF, "Expected {} found EOF", (stringify!($($token)?))),
+    //     }
+    // };
+    ($token:pat, $span:ident = $tokens:expr => $res:expr) => {
+        match $tokens {
+            Some($crate::tokenizer::Token{ kind:$token, span: $span }) => $res,
             other => unexpected!(other, expected $token),
             // Some((wrong, span)) => fail!(span, "Expected {} found `{wrong:?}`", (stringify!($($token)?))),
             // _ => fail!(EOF, "Expected {} found EOF", (stringify!($($token)?))),
         }
     };
-    ($token:pat in $tokens:ident => $res:expr) => {
+    ($token:pat, $span:ident in $tokens:ident => $res:expr) => {
         match $tokens.next() {
-            Some($token) => $res,
+            Some($crate::tokenizer::Token{ kind:$token, span: $span }) => $res,
             other => unexpected!(other, expected $token),
             // Some((wrong, span)) => fail!(span, "Expected {} found `{wrong:?}`", (stringify!($($token)?))),
             // _ => fail!(EOF, "Expected {} found EOF", (stringify!($($token)?))),
@@ -20,17 +28,17 @@ macro_rules! expect {
 
 macro_rules! unexpected {
     ($token:expr, expected $($expected:tt)*) => {
-        if let Some(token) = $token {
-            fail!(token.1.clone(), "Expected `{}` found `{:?}`", (stringify!($($expected)*)), (token.0))
+        if let Some($crate::tokenizer::Token{kind, span}) = $token {
+            fail!(*span, "Expected `{}` found `{:?}`", (stringify!($($expected)*)), kind)
         } else {
-            fail!(0..0, "Expected `{}` found `{:?}`", (stringify!($($expected)*)), "EOF")
+            fail!($crate::tokenizer::Span::EOF, "Expected `{}` found `{:?}`", (stringify!($($expected)*)), "EOF")
         }
     };
     (expected $expected:tt in $tokens:expr) => {
-        if let Some(token) = $tokens.next() {
-            fail!(token.1.clone(), "Expected `{}` found `{:?}`", (stringify!($expected)), (token.0))
+        if let Some($crate::tokenizer::Token{kind, span}) = $tokens.next() {
+            fail!(*span, "Expected `{}` found `{:?}`", (stringify!($expected)), kind)
         } else {
-            fail!(0..0, "Expected `{}` found `{:?}`", (stringify!($expected)), "EOF")
+            fail!($crate::tokenizer::Span::EOF, "Expected `{}` found `{:?}`", (stringify!($expected)), "EOF")
         }
     };
 }
@@ -76,14 +84,22 @@ macro_rules! any {
         $($pat:pat => $target:expr),*
         $(,)?
     } => {
-        let current = $tokens.current();
+        let current = $tokens.clone();
         $(
             if let Ok($pat) = $tokens.parse() {
                 return Ok($target);
             } else {
-                $tokens.reset_to(current);
+                *$tokens = current;
             }
         )*
 
+    };
+}
+
+macro_rules! defer {
+    ($in:expr; $($vars:pat),* => $expr:expr) => {
+        match $in {
+            $($vars => $expr),*
+        }
     };
 }

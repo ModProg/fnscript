@@ -9,7 +9,7 @@ pre fn() {
 
 // Gets executed before help
 pre(help) fn() {
-    pub let config: {source: Path, sync: Path} = load_config("sync_config.toml");
+    pub let config: Option<{source: Path, sync: Path}> = load_config("sync_config.toml");
     pub let config_path = config_path("sync_config.toml");
 }
 
