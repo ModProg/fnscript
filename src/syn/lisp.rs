@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 pub trait ToLisp {
     fn to_lisp(&self) -> Lisp;
 }
@@ -11,7 +11,7 @@ pub enum Lisp {
 impl Debug for Lisp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Single(arg0) => arg0.fmt(f),
+            Self::Single(arg0) => Display::fmt(arg0, f),
             Self::Multiple(arg0) => arg0.fmt(f),
         }
     }
