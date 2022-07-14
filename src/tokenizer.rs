@@ -1,10 +1,17 @@
 #![allow(clippy::eval_order_dependence)]
-use std::{borrow::Cow, iter};
+use std::{
+    borrow::Cow,
+    fmt::{Debug, Display},
+    iter,
+    ops::Add,
+};
 
 use rustc_lexer::unescape::{unescape_raw_str, unescape_str, EscapeError};
 use unicode_normalization::UnicodeNormalization;
 use unicode_width::UnicodeWidthChar;
 use unicode_xid::UnicodeXID;
+
+use crate::syn::{Error, Result};
 
 pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 pub type TokenStream<'source> = &'source mut TokenBuffer<'source>;
@@ -399,12 +406,45 @@ impl<'source> ParseBuffer<'source> {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<&'source Token<'source>> {
+    pub fn next(&mut self) -> Option<Result<ParseToken<'source>>> {
         let token = self.tokens.first();
-        if token.is_some() {
+        if let Some(token) = token {
             self.tokens = &self.tokens[1..];
+            if let Some(delimiter) = &token.kind.delimiter() {
+                if let Some(other) = self.next_delimiter(&token.kind, delimiter) {
+                    let ret = Some(Ok(ParseToken::Group {
+                        start: token,
+                        end: &self.tokens[other],
+                        inner: ParseBuffer {
+                            tokens: &self.tokens[..other],
+                        },
+                    }));
+                    self.tokens = &self.tokens[other + 1..];
+                    return ret;
+                } else {
+                    return Some(Err(Error::new(
+                        token.span,
+                        format!(
+                            "Did not find matching delimiter for `{token}` expected `{delimiter}`"
+                        ),
+                    )));
+                }
+            }
         }
-        token
+        token.map(ParseToken::from).map(Ok)
+    }
+
+    fn next_delimiter(&self, left: &TokenKind, right: &TokenKind) -> Option<usize> {
+        let mut open = 0;
+        self.tokens.iter().position(|token| {
+            match &token {
+                Token { kind, .. } if kind == left => open += 1,
+                Token { kind, .. } if kind == right && open == 0 => return true,
+                Token { kind, .. } if kind == right => open -= 1,
+                _ => (),
+            }
+            false
+        })
     }
 
     pub fn next_back(&mut self) -> Option<&'source Token<'source>> {
@@ -435,10 +475,72 @@ impl Span {
     }
 }
 
+impl Add for Span {
+    type Output = Self;
+
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self.extend(rhs);
+        self
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Token<'source> {
     pub span: Span,
     pub kind: TokenKind<'source>,
+}
+
+impl Display for Token<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
+impl Display for TokenKind<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+#[derive(Debug)]
+pub enum ParseToken<'source> {
+    Normal(&'source Token<'source>),
+    Group {
+        start: &'source Token<'source>,
+        end: &'source Token<'source>,
+        inner: ParseBuffer<'source>,
+    },
+}
+
+impl<'source> From<&'source Token<'source>> for ParseToken<'source> {
+    fn from(token: &'source Token) -> Self {
+        Self::Normal(token)
+    }
+}
+
+pub trait ParseTokenExt {
+    fn normal(&self) -> Result<Option<&Token>>;
+}
+
+impl ParseTokenExt for Option<Result<ParseToken<'_>>> {
+    fn normal(&self) -> Result<Option<&Token>> {
+        Ok(
+            match match self {
+                Some(Ok(s)) => Some(s),
+                Some(Err(e)) => return Err(e.clone()),
+                None => None,
+            } {
+                Some(ParseToken::Normal(token)) => Some(token),
+                Some(ParseToken::Group { start, end, .. }) => {
+                    return Err(Error::new(
+                        start.span + end.span,
+                        "Expected simple token found group".to_owned(),
+                    ));
+                }
+                None => None,
+            },
+        )
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -517,6 +619,18 @@ pub enum TokenKind<'source> {
 
     EOF,
     IGNORE,
+}
+
+impl TokenKind<'_> {
+    fn delimiter(&self) -> Option<Self> {
+        use TokenKind::*;
+        match self {
+            BraceOpen => Some(BraceClose),
+            ParenOpen => Some(ParenClose),
+            BracketOpen => Some(BracketClose),
+            _ => None,
+        }
+    }
 }
 
 impl<'source> PartialEq<&str> for TokenKind<'source> {

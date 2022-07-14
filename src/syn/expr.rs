@@ -190,7 +190,7 @@ impl Parse for FunctionCall {
         let mut inner;
         Ok(Self {
             path: tokens.parse()?,
-            paren: delimited!(inner in tokens)?,
+            paren: delimited!(inner in tokens),
             args: (&mut inner).parse_seperated::<_, Token![,]>()?,
         })
     }

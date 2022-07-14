@@ -17,7 +17,7 @@ macro_rules! expect {
         }
     };
     ($token:pat, $span:ident in $tokens:ident => $res:expr) => {
-        match $tokens.next() {
+        match $crate::tokenizer::ParseTokenExt::normal(&$tokens.next())? {
             Some($crate::tokenizer::Token{ kind:$token, span: $span }) => $res,
             other => unexpected!(other, expected $token),
             // Some((wrong, span)) => fail!(span, "Expected {} found `{wrong:?}`", (stringify!($($token)?))),
@@ -35,7 +35,7 @@ macro_rules! unexpected {
         }
     };
     (expected $expected:tt in $tokens:expr) => {
-        if let Some($crate::tokenizer::Token{kind, span}) = $tokens.next() {
+        if let Some($crate::tokenizer::ParseToken::Normal($crate::tokenizer::Token{kind, span})) = $tokens.next().transpose()? {
             fail!(*span, "Expected `{}` found `{:?}`", (stringify!($expected)), kind)
         } else {
             fail!($crate::tokenizer::Span::EOF, "Expected `{}` found `{:?}`", (stringify!($expected)), "EOF")

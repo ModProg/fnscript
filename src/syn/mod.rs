@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 use std::{fmt::Display, iter};
 
-use crate::tokenizer::{ParseBuffer, Span, Token, TokenBuffer, TokenKind};
+use crate::tokenizer::{
+    ParseBuffer, ParseToken, ParseTokenExt, Span, Token, TokenBuffer, TokenKind,
+};
 
 #[macro_use]
 mod macros;
@@ -73,13 +75,14 @@ impl<'source> ParseBuffer<'source> {
             {
                 *self = current;
                 return T::parse(&mut ParseBuffer {
-                    tokens: &inner.tokens[0..i],
+                    tokens: &inner.tokens[0..=i],
                 });
             } else {
-                self.next().expect("should never reach end");
+                self.next().expect("should never reach end")?;
             }
         }
-        todo!("handle missing delimiter");
+        let mut inner = inner;
+        T::parse(&mut inner)
         // let mut tokens = iter::from_fn(|| {
         //     if self.peek().is_none() {
         //         None
@@ -114,17 +117,17 @@ impl<'source> ParseBuffer<'source> {
 //     line: usize,
 //     column: usize,
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Error {
     span: Span,
     msg: String,
 }
 
 impl Error {
-    fn new(span: Span, msg: String) -> Self {
+    pub fn new(span: Span, msg: String) -> Self {
         Self { span, msg }
     }
-    fn eof(msg: String) -> Self {
+    pub fn eof(msg: String) -> Self {
         Self {
             span: Span::EOF,
             msg,
@@ -225,7 +228,7 @@ pub struct DocComment {
 
 impl Parse for DocComment {
     fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
-        let (mut comment, mut span) = match tokens.next() {
+        let (mut comment, mut span) = match tokens.next().normal()? {
             Some(Token {
                 kind: TokenKind::DocComment(comment),
                 span,
@@ -239,11 +242,11 @@ impl Parse for DocComment {
                 ..
             })
         ) {
-            match tokens.next() {
-                Some(Token {
+            match tokens.next().transpose()? {
+                Some(ParseToken::Normal(Token {
                     kind: TokenKind::DocComment(line),
                     span: line_span,
-                }) => {
+                })) => {
                     comment.push('\n');
                     comment.push_str(line);
                     span.extend(*line_span);
@@ -264,9 +267,9 @@ impl Parse for Function {
             vis: tokens.parse()?,
             fun: tokens.parse()?,
             name: tokens.parse()?,
-            paren: delimited!(args in tokens)?,
+            paren: delimited!(args in tokens),
             args: (&mut args).parse_seperated::<_, Comma>()?,
-            brace: delimited!(body in tokens)?,
+            brace: delimited!(body in tokens),
             body: (&mut body).parse_seperated::<_, Semi>()?,
         })
     }
@@ -288,7 +291,7 @@ impl Parse for VisKind {
             value => Self::Pre(value),
             value => Self::Post(value),
         };
-        unexpected!(tokens.next(), expected VisKind);
+        unexpected!(expected VisKind in tokens);
     }
 }
 
@@ -313,7 +316,7 @@ impl Parse for Hook {
             value => Self::All(value),
             value => Self::Name(value),
         };
-        unexpected!(tokens.next(), expected VisKind);
+        unexpected!(expected VisKind in tokens);
     }
 }
 
@@ -352,7 +355,7 @@ impl Parse for Vis {
                 })
             ) {
             let mut inner;
-            let paren: Paren = delimited!(inner in tokens)?;
+            let paren: Paren = delimited!(inner in tokens);
             let span = paren.span;
             (Some(paren), Some((&mut inner).parse()?), span)
         } else {
@@ -389,7 +392,7 @@ impl ToLisp for Ident {
 
 impl Parse for Ident {
     fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
-        match tokens.next() {
+        match tokens.next().normal()? {
             Some(Token {
                 kind: TokenKind::Ident(name),
                 span,
@@ -496,11 +499,8 @@ pub enum Type {
 
 impl ToLisp for Type {
     fn to_lisp(&self) -> Lisp {
-        match self {
-            Type::Struct(ty) => lisp!(ty),
-            Type::Selection(_) => todo!(),
-            Type::Path(path) => lisp!(path),
-        }
+        use Type::*;
+        defer!(self; Struct(v), Selection(v), Path(v) => lisp!(v))
     }
 }
 
@@ -511,7 +511,7 @@ impl Parse for Type {
             value => Self::Selection(value),
             value => Self::Path(value),
         }
-        unexpected!(tokens.next(), expected Type);
+        unexpected!(expected Type in tokens);
     }
 }
 
@@ -531,7 +531,7 @@ impl Parse for StructType {
     fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
         let mut inner;
         Ok(Self {
-            brace: delimited!(inner in tokens)?,
+            brace: delimited!(inner in tokens),
             fields: (&mut inner).parse_seperated::<_, Token![,]>()?,
         })
     }
@@ -542,6 +542,13 @@ pub struct SelectionType {
     path: Path,
     in_: Token![in],
     expr: Expression,
+}
+
+impl ToLisp for SelectionType {
+    fn to_lisp(&self) -> Lisp {
+        let Self { path, in_, expr } = self;
+        lisp![(in_ path expr)]
+    }
 }
 
 impl Parse for SelectionType {
@@ -581,6 +588,5 @@ mod tests {
         let mut tokens = tokens.to_parse();
         let script: Script = tokens.parse().unwrap();
         println!("{:#?}", script.to_lisp());
-        // dbg!(script);
     }
 }

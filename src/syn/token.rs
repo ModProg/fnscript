@@ -70,26 +70,33 @@ macro_rules! delimiters {
                 fn parse_delimited<'source>(
                     tokens: &mut crate::tokenizer::ParseBuffer<'source>,
                 ) -> super::Result<(Self, crate::tokenizer::ParseBuffer<'source>)> {
-                    let mut start = expect!($crate::tokenizer::TokenKind::$start, span in tokens => *span);
-                    let mut open = 0;
-
-                    let end = tokens.tokens.iter().position(|token| {
-                        match &token {
-                            $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$start, ..} => open += 1,
-                            $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$end, ..} if open == 0 => return true,
-                            $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$end, ..} => open -= 1,
-                            _ => ()
-                        }
-                        false
-                    }).ok_or_else(|| error!(start, "Missing {} for {}", (stringify!($end)), (stringify!($start))))?;
-
-                    start.extend(tokens.tokens[end].span);
-
-                    let inner = &tokens.tokens[0..end];
-
-                    tokens.tokens = &tokens.tokens[end+1..];
-
-                    Ok((Self{ span: start }, $crate::tokenizer::ParseBuffer{tokens: inner}))
+                    match tokens.next() {
+                        Some(Ok($crate::tokenizer::ParseToken::Group{start, end, inner})) if start.kind == $crate::tokenizer::TokenKind::$start => Ok((Self{span: start.span + end.span}, inner)),
+                        Some(Ok($crate::tokenizer::ParseToken::Group{start, ..})) => unexpected!(Some(start), expected $start),
+                        Some(Err(e)) => return Err(e.clone()),
+                        Some(Ok($crate::tokenizer::ParseToken::Normal(normal))) => unexpected!(Some(normal), expected $start),
+                        None => unexpected!(&None, expected $start)
+                    }
+                    // let mut start = expect!($crate::tokenizer::TokenKind::$start, span in tokens => *span);
+                    // let mut open = 0;
+                    //
+                    // let end = tokens.tokens.iter().position(|token| {
+                    //     match &token {
+                    //         $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$start, ..} => open += 1,
+                    //         $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$end, ..} if open == 0 => return true,
+                    //         $crate::tokenizer::Token{kind:$crate::tokenizer::TokenKind::$end, ..} => open -= 1,
+                    //         _ => ()
+                    //     }
+                    //     false
+                    // }).ok_or_else(|| error!(start, "Missing {} for {}", (stringify!($end)), (stringify!($start))))?;
+                    //
+                    // start.extend(tokens.tokens[end].span);
+                    //
+                    // let inner = &tokens.tokens[0..end];
+                    //
+                    // tokens.tokens = &tokens.tokens[end+1..];
+                    //
+                    // Ok((Self{ span: start }, $crate::tokenizer::ParseBuffer{tokens: inner}))
                 }
             }
         )*
@@ -107,7 +114,7 @@ macro_rules! delimited {
         match $tokens.parse_delimited() {
             Ok((token, content)) => {
                 $content = content;
-                Ok(token)
+                token
             }
             Err(e) => return Err(e),
         }
