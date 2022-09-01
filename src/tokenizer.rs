@@ -16,6 +16,8 @@ use crate::syn::{Error, Result};
 pub type Lexer<'source> = logos::Lexer<'source, Token<'source>>;
 pub type TokenStream<'source> = &'source mut TokenBuffer<'source>;
 
+pub type ParseStream<'a, 'source> = &'a mut ParseBuffer<'source>;
+
 #[derive(Debug, Clone)]
 pub struct TokenBuffer<'source> {
     tokens: Vec<Token<'source>>,
@@ -82,10 +84,13 @@ macro_rules! match_token {
         }
     };
     ($token:ident($_:tt) in $source:expr, $cond:expr, $end:expr, |$var:ident| $map:expr) => {
+        match_token!($token($_) in $source, $cond, $end, |$var, end| $map)
+    };
+    ($token:ident($_:tt) in $source:expr, $cond:expr, $end:expr, |$var:ident, $end_var:ident| $map:expr) => {
         if $source.starts_with($cond) {
-            let end = $source.find($end).unwrap_or_else(|| $source.len());
-            let $var = &$source[0..end];
-            return (TokenKind::$token($map), end);
+            let $end_var = $source.find($end).unwrap_or_else(|| $source.len());
+            let $var = &$source[0..$end_var];
+            return (TokenKind::$token($map), $end_var);
         }
     };
     ($token:ident in $source:expr, $match:expr) => {
@@ -145,6 +150,8 @@ macro_rules! unwrap_res {
 // TODO implement way to do gracefull errors
 fn first_token(source: &str) -> Option<(TokenKind, usize)> {
     use TokenKind::{Error, Number};
+
+    let mut parse_index = false;
     (!source.is_empty()).then(|| {
         match_token!(IGNORE in source, char::is_whitespace, |c: char| !c.is_whitespace());
         match_token!(IGNORE in source, "////", '\n');
@@ -154,6 +161,11 @@ fn first_token(source: &str) -> Option<(TokenKind, usize)> {
             comment.strip_prefix(' ').unwrap_or(comment)
         });
         match_token!(IGNORE in source, "//", '\n');
+
+        // Reset parse_index when anything other than comments is parsed.
+        let local_parse_index = parse_index;
+        parse_index = false;
+
         if source.starts_with(|c| c == '"' || c == '\'') {
             let delimiter = source.chars().next().expect("is a quote");
             let mut escaped = false;
@@ -244,6 +256,15 @@ fn first_token(source: &str) -> Option<(TokenKind, usize)> {
 
             return (TokenKind::RawString(out.into()), string_end + pounds + 1);
         }
+
+        if local_parse_index {
+            match_token!(Index(_) in source, char::is_numeric, |c:char| !c.is_numeric(),
+                |index, end| match index.parse() {
+                    Ok(index) => index,
+                    Err(error) => return ( Error(format!("Error parsing index: {error}")), end),
+                });
+        }
+
         if source.starts_with('0') && source[1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
             let base = match source[1..]
                 .chars()
@@ -316,10 +337,11 @@ fn first_token(source: &str) -> Option<(TokenKind, usize)> {
         }
         // Idents after literals and Keywords to support more things later on
         match_keyword![source=>
-            Fn, Let, In, Hid, Pub, Pre, Post, True, False
+            Fn, Let, In, Hid, Pub, Pre, Post, True, False, If, Else, Loop, While, For, Return, Break, Continue,
         ];
         match_token!(Ident(_) in source, char::is_xid_start, |c:char| !c.is_xid_continue(),
             |ident| ident.nfc().collect::<Cow<str>>());
+
         match_tokens![source=>
             // brackets
             BraceOpen("{"),
@@ -331,36 +353,35 @@ fn first_token(source: &str) -> Option<(TokenKind, usize)> {
             // punctuation
             Semi(";"),
             Comma(","),
-            Dot("."),
-            RangeSep(".."),
             InklRangeSep("..="),
+            RangeSep(".."),
             Question("?"),
-            Colon(":"),
             PathSep("::"),
-            Eq("="),
+            Colon(":"),
             EqEq("=="),
+            Eq("="),
             NotEq("!="),
             Bang("!"),
-            Lt("<"),
             LtEq("<="),
-            Gt(">"),
+            Lt("<"),
             GtEq(">="),
+            Gt(">"),
             Arrow("->"),
             Minus("-"),
-            And("&&"),
             AndAssign("&&="),
-            Or("||"),
+            And("&&"),
             OrAssign("||="),
-            Plus("+"),
+            Or("||"),
             PlusAssign("+="),
-            Asterix("*"),
+            Plus("+"),
             MulAssign("*="),
-            Div("/"),
+            Asterix("*"),
             DivAssign("/="),
-            Carret("^"),
+            Div("/"),
             ExpAssign("^="),
-            Percent("%"),
+            Carret("^"),
             ModAssign("%="),
+            Percent("%"),
             // pipes
             Pipe("|>"),
             Pipe("|o>"),
@@ -368,6 +389,12 @@ fn first_token(source: &str) -> Option<(TokenKind, usize)> {
             PipeAll("|eo>"),
             PipeAll("|oe>"),
         ];
+
+        if source.starts_with('.') {
+            parse_index = true;
+        }
+
+        match_token!(Dot in source, ".");
         todo!("{source}")
     })
 }
@@ -395,16 +422,29 @@ impl StringExt for str {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct ParseBuffer<'source> {
     pub tokens: &'source [Token<'source>],
 }
 
-impl<'source> ParseBuffer<'source> {
-    pub fn peek(&self) -> Option<&Token<'source>> {
-        self.tokens.first()
+impl Debug for ParseBuffer<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParseBuffer")
+            .field(
+                "tokens",
+                &self.tokens.iter().map(|t| &t.kind).collect::<Vec<_>>(),
+            )
+            .finish()
     }
+}
 
+impl<'source> ParseBuffer<'source> {
+    pub fn fork(&self) -> Self {
+        *self
+    }
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Result<ParseToken<'source>>> {
         let token = self.tokens.first();
@@ -423,7 +463,11 @@ impl<'source> ParseBuffer<'source> {
                     return ret;
                 } else {
                     return Some(Err(Error::new(
-                        token.span,
+                        if let Some(last) = self.tokens.last() {
+                            token.span + last.span
+                        } else {
+                            token.span
+                        },
                         format!(
                             "Did not find matching delimiter for `{token}` expected `{delimiter}`"
                         ),
@@ -512,6 +556,23 @@ pub enum ParseToken<'source> {
     },
 }
 
+impl ParseToken<'_> {
+    pub fn span(&self) -> Span {
+        match self {
+            ParseToken::Normal(token) => token.span,
+            ParseToken::Group { start, end, .. } => start.span + end.span,
+        }
+    }
+
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        match self {
+            ParseToken::Normal(_) => 1,
+            ParseToken::Group { inner, .. } => inner.tokens.len() + 2,
+        }
+    }
+}
+
 impl<'source> From<&'source Token<'source>> for ParseToken<'source> {
     fn from(token: &'source Token) -> Self {
         Self::Normal(token)
@@ -547,6 +608,7 @@ impl ParseTokenExt for Option<Result<ParseToken<'_>>> {
 pub enum TokenKind<'source> {
     // TODO Only normalize if necessary
     Ident(Cow<'source, str>),
+    Index(u64),
 
     // Keywords
     Fn,
@@ -558,6 +620,14 @@ pub enum TokenKind<'source> {
     Post,
     True,
     False,
+    If,
+    While,
+    Loop,
+    Else,
+    For,
+    Return,
+    Break,
+    Continue,
 
     // Literals
     String(Cow<'source, str>),

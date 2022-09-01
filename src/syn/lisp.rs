@@ -1,8 +1,36 @@
+pub use fns_macros::ToLisp;
 use std::fmt::{Debug, Display};
+
+macro_rules! lisp {
+    [($($tts:tt)*)] => {
+        Lisp::Multiple(vec![$(lisp!($tts)),*])
+    };
+    ({$expr:expr}) => {
+        $expr.to_lisp()
+    };
+    ($expr:expr) => {
+        $expr.to_lisp()
+    };
+}
+
+#[allow(unused)]
+macro_rules! lispm {
+    [($($tts:tt)*)] => {
+        Lisp::Multiple(vec![$(lispm!($tts)),*])
+    };
+    [$tt:tt] => {
+        Lisp::Single(stringify!($tt).to_string())
+    };
+    [$($tts:tt)*] => {
+        Lisp::Multiple(vec![$(lispm!($tts)),*])
+    };
+}
+
 pub trait ToLisp {
     fn to_lisp(&self) -> Lisp;
 }
 
+#[derive(PartialEq)]
 pub enum Lisp {
     Single(String),
     Multiple(Vec<Lisp>),
@@ -23,19 +51,13 @@ impl<T: ToLisp> ToLisp for Vec<T> {
     }
 }
 
-macro_rules! lisp {
-    [($($tts:tt)*)] => {
-        Lisp::Multiple(vec![$(lisp!($tts)),*])
-    };
-    ({$expr:expr}) => {
-        $expr.to_lisp()
-    };
-    ($expr:expr) => {
-        $expr.to_lisp()
-    };
+impl ToLisp for str {
+    fn to_lisp(&self) -> Lisp {
+        Lisp::Single(self.to_string())
+    }
 }
 
-impl ToLisp for str {
+impl ToLisp for u64 {
     fn to_lisp(&self) -> Lisp {
         Lisp::Single(self.to_string())
     }
@@ -47,5 +69,12 @@ impl<T: ToLisp> ToLisp for Option<T> {
             Some(inner) => lisp![(inner)],
             None => lisp![()],
         }
+    }
+}
+
+impl<T: ToLisp> ToLisp for Box<T> {
+    fn to_lisp(&self) -> Lisp {
+        // We call it on the inner of Box so to say
+        (**self).to_lisp()
     }
 }

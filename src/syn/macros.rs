@@ -24,6 +24,11 @@ macro_rules! expect {
             // _ => fail!(EOF, "Expected {} found EOF", (stringify!($($token)?))),
         }
     };
+    (empty, $tokens:ident) => {
+        if let Some(token) = $tokens.next().transpose()? {
+             fail!(token.span(), "Did not expect remaining tokens.")
+        }
+    };
 }
 
 macro_rules! unexpected {
@@ -95,11 +100,14 @@ macro_rules! any {
 
     };
 }
+#[macro_export]
+macro_rules! assert_parse_to {
+    ($fns:expr, $type:ident($($lisp:tt)*)) => {
+        let tokens = tokenize($fns);
+        let mut tokens = tokens.to_parse();
 
-macro_rules! defer {
-    ($in:expr; $($vars:pat),* => $expr:expr) => {
-        match $in {
-            $($vars => $expr),*
-        }
+        let fc: $type = tokens.parse().unwrap();
+        let fc = fc.to_lisp();
+        assert_eq!(fc, lispm!($($lisp)*));
     };
 }

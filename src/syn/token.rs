@@ -21,7 +21,10 @@ macro_rules! tokens {
             }
         )*
         macro_rules! Token {
-            $(($token) => {$crate::syn::token::$name});*
+            $(($token) => {$crate::syn::token::$name});*;
+            (()) => {$crate::syn::token::Paren};
+            ([]) => {$crate::syn::token::Bracket};
+            ({}) => {$crate::syn::token::Brace};
         }
     };
 }
@@ -34,11 +37,17 @@ tokens! {
     pub  Pub
     pre  Pre
     post Post
+    if   If
+    return Return
+    else Else
+    true True
+    false False
 
     // Punctuation
     :   Colon
     ::  PathSep
     ,   Comma
+    .   Dot
     ;   Semi
     =   Eq
     ?   Question
@@ -65,6 +74,13 @@ macro_rules! delimiters {
             #[derive(Debug)]
             pub struct $name {
                 pub span: Span
+            }
+
+            impl $crate::syn::Peek for $name {
+                fn peek(tokens: &$crate::tokenizer::ParseBuffer) -> bool {
+                    let mut copy = *tokens;
+                    matches!(copy.next(), Some(Ok($crate::tokenizer::ParseToken::Group{start,..})) if start.kind == $crate::tokenizer::TokenKind::$start )
+                }
             }
             impl ParseDelimited for $name {
                 fn parse_delimited<'source>(
