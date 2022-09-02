@@ -1,12 +1,7 @@
-use std::{
-    ffi::OsString,
-    fs::{self, read_to_string},
-    io::stderr,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsString, fs::read_to_string, io::stderr, path::PathBuf};
 
-use anyhow::{anyhow, Result};
-use clap::{CommandFactory, ErrorKind, Parser};
+use anyhow::Result;
+use clap::{CommandFactory, Parser};
 use fnscript::{syn::Script, tokenizer::tokenize};
 
 #[derive(Parser)]
@@ -48,11 +43,10 @@ fn main() -> Result<()> {
     )?;
     let matches = match command.try_get_matches_from_mut(&args) {
         Ok(matches) => matches,
-        Err(e) if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) => {
+        Err(_) => {
             script.print_help(command, &args)?;
             unreachable!()
         }
-        Err(e) => e.exit(),
     };
     dbg!(matches);
 

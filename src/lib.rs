@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ffi::OsString, mem, convert::Infallible};
+use std::{convert::Infallible, ffi::OsString, mem};
 
 use anyhow::{anyhow, bail, Result};
 use clap::Command;
@@ -33,19 +33,6 @@ impl Script {
     pub fn print_help(&self, command: Command, args: &[OsString]) -> Result<Infallible> {
         let Self { doc, fns } = self;
 
-        // This is up here because Clap is very limited when it comes to dynamic help texts
-        // The lifetime requirenments are annoying....
-        let sub_command_abouts: Vec<_> = fns
-            .iter()
-            .filter(|fun| fun.vis.is_pub())
-            .map(|fun| fun.doc.as_ref().map(|d| slight_markdown(&d.comment)))
-            .collect();
-
-        // I really want to replace this line with
-        // let mut command = command;
-        // But then lifetimes cry and I have no idea really why and how to solve this
-        let mut command = self.to_command(command.get_bin_name().expect("bin name is set"))?;
-
         let doc = doc.as_ref().map(|d| d.comment.as_str()).unwrap_or_default();
         let (
             FrontMatter {
@@ -63,7 +50,22 @@ impl Script {
             Some(doc)
         };
         let about = if about.is_empty() { None } else { Some(about) };
-        // TODO let mut bin_name = None;
+
+        let long_about = long_about.map(slight_markdown);
+        let about = about.map(slight_markdown);
+
+        // This is up here because Clap is very limited when it comes to dynamic help texts
+        // The lifetime requirenments are annoying....
+        let sub_command_abouts: Vec<_> = fns
+            .iter()
+            .filter(|fun| fun.vis.is_pub())
+            .map(|fun| fun.doc.as_ref().map(|d| slight_markdown(&d.comment)))
+            .collect();
+
+        // I really want to replace this line with
+        // let mut command = command;
+        // But then lifetimes cry and I have no idea really why and how to solve this
+        let mut command = self.to_command(command.get_bin_name().expect("bin name is set"))?;
 
         if let Some(title) = title {
             command = command.name(title);
@@ -77,12 +79,8 @@ impl Script {
         if let Some(long_version) = long_version {
             command = command.long_version(long_version)
         }
-        if let Some(long_about) = long_about {
-            command = command.long_about(long_about)
-        }
-        if let Some(about) = about {
-            command = command.about(about)
-        }
+        command = command.long_about(long_about.as_deref());
+        command = command.about(about.as_deref());
         for (about, subcommand) in sub_command_abouts.iter().zip(command.get_subcommands_mut()) {
             let s = mem::take(subcommand);
             *subcommand = s.about(about.as_deref());
@@ -178,11 +176,13 @@ fn get_paragraph(doc: &str) -> (&str, &str) {
 fn slight_markdown(doc: &str) -> String {
     doc.lines()
         .map(|l| {
-            if l.starts_with(char::is_whitespace) {
-                Cow::Owned(format!("\n{l}"))
+            if l.starts_with(char::is_whitespace) || l.is_empty() {
+                format!("\n{l}")
             } else {
-                Cow::Borrowed(l)
+                format!(" {l}")
             }
         })
-        .collect()
+        .collect::<String>()
+        .trim_start()
+        .to_string()
 }
