@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ffi::OsString, mem};
+use std::{borrow::Cow, ffi::OsString, mem, convert::Infallible};
 
 use anyhow::{anyhow, bail, Result};
 use clap::Command;
@@ -30,8 +30,21 @@ impl Script {
         Ok(command.no_binary_name(true).bin_name(file_name))
     }
 
-    pub fn print_help(&self, mut command: Command, args: Vec<OsString>) -> Result<()> {
+    pub fn print_help(&self, command: Command, args: &[OsString]) -> Result<Infallible> {
         let Self { doc, fns } = self;
+
+        // This is up here because Clap is very limited when it comes to dynamic help texts
+        // The lifetime requirenments are annoying....
+        let sub_command_abouts: Vec<_> = fns
+            .iter()
+            .filter(|fun| fun.vis.is_pub())
+            .map(|fun| fun.doc.as_ref().map(|d| slight_markdown(&d.comment)))
+            .collect();
+
+        // I really want to replace this line with
+        // let mut command = command;
+        // But then lifetimes cry and I have no idea really why and how to solve this
+        let mut command = self.to_command(command.get_bin_name().expect("bin name is set"))?;
 
         let doc = doc.as_ref().map(|d| d.comment.as_str()).unwrap_or_default();
         let (
@@ -70,12 +83,6 @@ impl Script {
         if let Some(about) = about {
             command = command.about(about)
         }
-
-        let sub_command_abouts: Vec<_> = fns
-            .iter()
-            .filter(|fun| fun.vis.is_pub())
-            .map(|fun| fun.doc.as_ref().map(|d| slight_markdown(&d.comment)))
-            .collect();
         for (about, subcommand) in sub_command_abouts.iter().zip(command.get_subcommands_mut()) {
             let s = mem::take(subcommand);
             *subcommand = s.about(about.as_deref());

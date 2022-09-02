@@ -40,19 +40,21 @@ fn main() -> Result<()> {
     let tokens = tokenize(script);
     let script: Script = tokens.to_parse().parse()?;
 
-    let command = script.to_command(
+    let mut command = script.to_command(
         &file
             .file_name()
             .expect("Only files can be read")
             .to_string_lossy(),
     )?;
-    let matches = match command.try_get_matches_from(&args) {
+    let matches = match command.try_get_matches_from_mut(&args) {
         Ok(matches) => matches,
-        Err(e) if e.kind() == ErrorKind::DisplayHelp => {
-            script.enrich_help(command).get_matches_from(args)
+        Err(e) if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) => {
+            script.print_help(command, &args)?;
+            unreachable!()
         }
         Err(e) => e.exit(),
     };
+    dbg!(matches);
 
     Ok(())
 }
