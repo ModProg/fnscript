@@ -1,4 +1,24 @@
-#!/bin/env fn-script
+#!/bin/env fnscript
+// First paragraph containing front matter
+//! # Sync Config
+//  title: Sync Config
+//! by ModProg
+//  author: ModProg
+//  authors: ModProg
+//! v0.5 (2022-05-02)
+//  v0.5
+//  0.5
+//  version: 0.5
+//  long version: 0.5 (2022-05-02)
+//!
+// Second paragraph will be printed on short and long help
+//! Some short description will be shown both on -h and --help.
+//!
+// Third paragraph will be only show on long help
+//! This will only be shown on --help.
+//! this is a really great software
+//!     - believe me
+//!     - really
 
 // pre functions are executed before the rest of the script
 // Is not executed before help

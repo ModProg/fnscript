@@ -1,4 +1,3 @@
-#![allow(clippy::eval_order_dependence)]
 use std::{
     borrow::Cow,
     fmt::{Debug, Display},
@@ -154,6 +153,10 @@ fn first_token(source: &str) -> Option<(TokenKind, usize)> {
     let mut parse_index = false;
     (!source.is_empty()).then(|| {
         match_token!(IGNORE in source, char::is_whitespace, |c: char| !c.is_whitespace());
+        match_token!(ScriptDocComment(_) in source, "//!", '\n', |comment| {
+            let comment = comment.trim_start_matches("//!").trim_end();
+            comment.strip_prefix(' ').unwrap_or(comment)
+        });
         match_token!(IGNORE in source, "////", '\n');
         // Only exactly 3 /// should trigger doc comment
         match_token!(DocComment(_) in source, "///", '\n', |comment| {
@@ -682,6 +685,7 @@ pub enum TokenKind<'source> {
     PipeError,
     PipeAll,
 
+    ScriptDocComment(&'source str),
     DocComment(&'source str),
 
     // Ignored and errors

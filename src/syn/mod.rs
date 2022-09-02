@@ -4,9 +4,9 @@ use std::{
     iter,
 };
 
-use crate::tokenizer::{ParseBuffer, ParseToken, ParseTokenExt, Span, Token, TokenKind};
-
 pub use fns_macros::Parse;
+
+use crate::tokenizer::{ParseBuffer, ParseToken, ParseTokenExt, Span, Token, TokenKind};
 
 #[macro_use]
 mod macros;
@@ -52,7 +52,7 @@ impl<'source> ParseBuffer<'source> {
         T::peek(self)
     }
 
-    fn parse<T: Parse>(&mut self) -> Result<T> {
+    pub fn parse<T: Parse>(&mut self) -> Result<T> {
         T::parse(self)
     }
     fn parse_delimited<T: ParseDelimited>(&mut self) -> Result<(T, ParseBuffer<'source>)> {
@@ -147,7 +147,8 @@ impl<'source> ParseBuffer<'source> {
 //     line: usize,
 //     column: usize,
 // }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{msg}")]
 pub struct Error {
     span: Span,
     msg: String,
@@ -202,6 +203,7 @@ impl<T: Parse> Parse for Option<T> {
 #[derive(Debug, Parse, ToLisp)]
 #[lisp(fns)]
 pub struct Script {
+    pub doc: Option<ScriptDocComment>,
     pub fns: Vec<Function>,
 }
 
@@ -223,8 +225,40 @@ pub struct Function {
 }
 
 #[derive(Debug)]
+pub struct ScriptDocComment {
+    pub comment: String,
+    span: Span,
+}
+
+impl Parse for ScriptDocComment {
+    fn parse(tokens: &mut ParseBuffer) -> Result<Self> {
+        let (mut comment, mut span) = match tokens.next().normal()? {
+            Some(Token {
+                kind: TokenKind::ScriptDocComment(comment),
+                span,
+            }) => (comment.trim_end().to_string(), span.to_owned()),
+            other => unexpected!(other, expected ScriptDocComment),
+        };
+        while tokens.peek::<ScriptDocComment>() {
+            match tokens.next().transpose()? {
+                Some(ParseToken::Normal(Token {
+                    kind: TokenKind::ScriptDocComment(line),
+                    span: line_span,
+                })) => {
+                    comment.push('\n');
+                    comment.push_str(line.trim_end());
+                    span.extend(*line_span);
+                }
+                _ => unreachable!("Only loops when there are comments"),
+            }
+        }
+        Ok(Self { comment, span })
+    }
+}
+
+#[derive(Debug)]
 pub struct DocComment {
-    comment: String,
+    pub comment: String,
     span: Span,
 }
 
@@ -274,7 +308,13 @@ pub struct Vis {
     kind: Option<VisKind>,
     paren: Option<Paren>,
     hooks: Option<Vec<Hook>>,
-    span: Span,
+    pub span: Span,
+}
+
+impl Vis {
+    pub fn is_pub(&self) -> bool {
+        matches!(self.kind, Some(VisKind::Pub(_)))
+    }
 }
 
 impl Parse for Vis {
@@ -441,9 +481,8 @@ impl ToLisp for Path {
 
 #[cfg(test)]
 mod tests {
-    use crate::tokenizer::tokenize;
-
     use super::*;
+    use crate::tokenizer::tokenize;
 
     #[test]
     fn syn() {

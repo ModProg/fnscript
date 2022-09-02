@@ -402,11 +402,10 @@ mod parse {
     }
 
     fn unary_expr(input: ParseStream) -> Result<Expr> {
-        let begin = input.fork();
         if input.peek::<Token![!]>() || input.peek::<Token![-]>() {
             expr_unary(input).map(Expr::PreUnary)
         } else {
-            trailer_expr(begin, input)
+            trailer_expr(input)
         }
     }
 
@@ -417,9 +416,9 @@ mod parse {
         })
     }
 
-    fn trailer_expr(begin: ParseBuffer, input: ParseStream) -> Result<Expr> {
+    fn trailer_expr(input: ParseStream) -> Result<Expr> {
         let atom = atom_expr(input)?;
-        let mut e = trailer_helper(input, atom)?;
+        let e = trailer_helper(input, atom)?;
 
         // if let Expr::Verbatim(tokens) = &mut e {
         //     *tokens = verbatim::between(begin, input);
@@ -448,7 +447,7 @@ mod parse {
             //     _ => true,
             // }
             {
-                let mut dot: Token![.] = input.parse()?;
+                let dot: Token![.] = input.parse()?;
 
                 let member: Member = input.parse()?;
                 // TODO maybe implement Turbofish
@@ -561,7 +560,7 @@ mod parse {
         // } else if input.peek::<Token![let]>() {
         //     input.parse().map(Expr::Let)
         } else if input.peek::<Token![if]>() {
-            dbg!(input).parse().map(Expr::If)
+            input.parse().map(Expr::If)
         // } else if input.peek(Token![while]) {
         //     input.parse().map(Expr::While)
         // } else if input.peek(Token![for]) {

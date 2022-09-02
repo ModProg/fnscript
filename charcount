@@ -1,1 +1,0 @@
-cat src/** | tr -d '[:alnum:] \n' | fold -w1 | sort | uniq -c | sort -nr
