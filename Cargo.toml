@@ -8,18 +8,22 @@ keywords = []
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/ModProg/fnscript"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# clap = { git="https://github.com/clap-rs/clap", features = ["derive", "wrap_help"] }
+# clap = { git="https://github.com/modprog/clap", features = ["derive", "wrap_help"], branch = "more_resettable_builder" }
+# clap = { path = "../clap", features = ["derive", "wrap_help"] }
+anyhow = "1.0.63"
+clap = { version = "4.0.10", features = ["derive", "wrap_help", "string"] }
 logos = "0.12.1"
 rustc_lexer = "0.1.0"
+thiserror = "1.0.33"
 unicode-normalization = "0.1.19"
 unicode-width = "0.1.9"
 unicode-xid = "0.2.3"
-clap = { version = "3.2.19", features = ["derive", "wrap_help"] }
-anyhow = "1.0.63"
-thiserror = "1.0.33"
+derive_more = "0.99.17"
+getset = "0.1.2"
 
 [dependencies.fns-macros]
 path = "macros"

@@ -1,7 +1,7 @@
 use super::*;
 // (Range)
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 pub enum Expr {
     Variable(Path),
     Field(ExprField),
@@ -21,7 +21,7 @@ pub enum Expr {
     Block(ExprBlock),
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp((";" exprs))]
 pub struct ExprBlock {
     #[parse(inner = exprs)]
@@ -30,14 +30,14 @@ pub struct ExprBlock {
     exprs: Vec<Statement>,
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp((return_ expr))]
 pub struct ExprReturn {
     return_: Token![return],
     expr: Option<Box<Expr>>,
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp((expr))]
 pub struct ExprParen {
     #[parse(inner = expr)]
@@ -45,7 +45,7 @@ pub struct ExprParen {
     expr: Box<Expr>,
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp(("[]" expr index))]
 pub struct ExprIndex {
     expr: Box<Expr>,
@@ -53,7 +53,7 @@ pub struct ExprIndex {
     index: Box<Expr>,
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp(("[]" elems))]
 pub struct ExprArray {
     #[parse(inner = elems)]
@@ -62,7 +62,7 @@ pub struct ExprArray {
     elems: Vec<Expr>,
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp(("," fields))]
 pub struct ExprTuple {
     #[parse(inner = fields)]
@@ -72,7 +72,7 @@ pub struct ExprTuple {
 }
 
 // TODO support shorthand for a: a
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp(("{}" fields))]
 pub struct ExprStruct {
     #[parse(inner = fields)]
@@ -81,7 +81,7 @@ pub struct ExprStruct {
     fields: Vec<FieldValue>,
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp((colon member value))]
 pub struct FieldValue {
     member: Ident,
@@ -89,7 +89,7 @@ pub struct FieldValue {
     value: Box<Expr>,
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp((dot receiver method args))]
 pub struct ExprMethodCall {
     receiver: Box<Expr>,
@@ -99,7 +99,7 @@ pub struct ExprMethodCall {
     args: Vec<Expr>,
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
 #[lisp((dot base member))]
 pub struct ExprField {
     base: Box<Expr>,
@@ -107,16 +107,17 @@ pub struct ExprField {
     member: Member,
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
 pub enum ExprLit {
     String(LitStr),
     Number(LitNumber),
     Bool(LitBool),
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp(format!("{value}"))]
 pub struct LitBool {
+    #[span(ignored)]
     value: bool,
     span: Span,
 }
@@ -140,9 +141,10 @@ impl Parse for LitBool {
 }
 
 // TODO string expansion + raw strings
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp(format!("{:?}", value))]
 pub struct LitStr {
+    #[span(ignored)]
     value: String,
     span: Span,
 }
@@ -155,9 +157,10 @@ impl Parse for LitStr {
     }
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp(value.to_string())]
 pub struct LitNumber {
+    #[span(ignored)]
     value: f64,
     span: Span,
 }
@@ -170,7 +173,7 @@ impl Parse for LitNumber {
     }
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp((func args))]
 pub struct ExprCall {
     func: Box<Expr>,
@@ -178,20 +181,20 @@ pub struct ExprCall {
     args: Vec<Expr>,
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp((op expr))]
 pub struct ExprPreUnary {
     op: PreUnaryOp,
     expr: Box<Expr>,
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
 pub enum PreUnaryOp {
     Bang(Token![!]),
     Neg(Token![-]),
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp((op expr))]
 pub struct ExprPostUnary {
     expr: Box<Expr>,
@@ -203,13 +206,13 @@ pub struct FnCall {
     span: Span,
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
 pub enum PostUnaryOp {
     Question(Question),
     Bang(Bang),
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp((op lhs rhs))]
 pub struct ExprBinary {
     lhs: Box<Expr>,
@@ -251,7 +254,7 @@ pub struct ExprBinary {
 //     }
 // }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 pub enum BinOp {
     Add(Token![+]),
     Sub(Token![-]),
@@ -298,7 +301,7 @@ pub enum BinOp {
 //     }
 // }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp((if_ condition body else_))]
 pub struct ExprIf {
     if_: Token![if],
@@ -316,14 +319,14 @@ impl crate::syn::Parse for ExprIf {
             if_: __fns_macros_input.parse()?,
             condition: __fns_macros_input.parse()?,
             brace: delimited!(body in __fns_macros_input),
-            body: (&mut body).parse_seperated_complete::<_, Token![;
+            body: body.parse_seperated_complete::<_, Token![;
             ]>()?,
             else_: __fns_macros_input.parse()?,
         })
     }
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp((else_ expr))]
 pub struct ElseExpr {
     else_: Token![else],
@@ -343,7 +346,7 @@ impl Parse for ElseExpr {
     }
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp((else_ (body)))]
 pub struct Else {
     else_: Token![else],
@@ -353,22 +356,23 @@ pub struct Else {
     body: Vec<Statement>,
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 #[lisp((else_ if_))]
 pub struct ElseIf {
     else_: Token![else],
     if_: Box<ExprIf>,
 }
 
-#[derive(Debug, ToLisp, Parse)]
+#[derive(Debug, ToLisp, Parse, Spanned)]
 pub enum Member {
     Named(Ident),
     Unnamed(Index),
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp(index)]
 pub struct Index {
+    #[span(ignored)]
     index: u64,
     span: Span,
 }

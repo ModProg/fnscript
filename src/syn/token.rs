@@ -3,7 +3,7 @@ use super::{ParseDelimited, Span};
 macro_rules! tokens {
     {$($token:tt $name:ident)*} => {
         $(
-            #[derive(Debug)]
+            #[derive(Debug, fns_macros::Spanned)]
             pub struct $name {
                 pub span: Span
             }
@@ -42,6 +42,7 @@ tokens! {
     else Else
     true True
     false False
+    help Help
 
     // Punctuation
     :   Colon
@@ -71,7 +72,7 @@ tokens! {
 macro_rules! delimiters {
     {$($start:ident $end:ident $name:ident)*} => {
         $(
-            #[derive(Debug)]
+            #[derive(Debug, fns_macros::Spanned)]
             pub struct $name {
                 pub span: Span
             }

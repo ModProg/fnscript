@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     fmt::{Debug, Display},
-    iter,
+    iter::{self, Sum},
     ops::Add,
 };
 
@@ -340,7 +340,7 @@ fn first_token(source: &str) -> Option<(TokenKind, usize)> {
         }
         // Idents after literals and Keywords to support more things later on
         match_keyword![source=>
-            Fn, Let, In, Hid, Pub, Pre, Post, True, False, If, Else, Loop, While, For, Return, Break, Continue,
+            Fn, Let, In, Hid, Pub, Pre, Help, Post, True, False, If, Else, Loop, While, For, Return, Break, Continue,
         ];
         match_token!(Ident(_) in source, char::is_xid_start, |c:char| !c.is_xid_continue(),
             |ident| ident.nfc().collect::<Cow<str>>());
@@ -513,6 +513,10 @@ impl Span {
         start: (usize::MIN, usize::MIN),
         end: (usize::MAX, usize::MAX),
     };
+    pub const EMPTY: Self = Self {
+        start: (usize::MAX, usize::MAX),
+        end: (usize::MIN, usize::MIN),
+    };
     pub fn extend(&mut self, other: Span) {
         self.start = (
             self.start.0.min(other.start.0),
@@ -528,6 +532,62 @@ impl Add for Span {
     fn add(mut self, rhs: Self) -> Self::Output {
         self.extend(rhs);
         self
+    }
+}
+impl Add<Option<Span>> for Span {
+    type Output = Self;
+
+    fn add(mut self, rhs: Option<Span>) -> Self::Output {
+        if let Some(rhs) = rhs {
+            self.extend(rhs);
+        }
+        self
+    }
+}
+impl Add<Span> for Option<Span> {
+    type Output = Span;
+
+    fn add(self, rhs: Span) -> Self::Output {
+        rhs + self
+    }
+}
+
+impl Sum for Span {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Span::EMPTY, Add::add)
+    }
+}
+
+pub use fns_macros::Spanned;
+pub trait Spanned {
+    fn span(&self) -> Span;
+}
+
+impl<T: Spanned> Spanned for Box<T> {
+    fn span(&self) -> Span {
+        // We call it on the inner of Box so to say
+        (**self).span()
+    }
+}
+
+impl<T: Spanned> Spanned for Vec<T> {
+    fn span(&self) -> Span {
+        self.iter().map(Spanned::span).sum()
+    }
+}
+
+impl Spanned for Span {
+    fn span(&self) -> Span {
+        *self
+    }
+}
+pub trait SpannedOption {
+    fn span(&self) -> Option<Span>;
+}
+
+impl<T: Spanned> SpannedOption for Option<T> {
+    fn span(&self) -> Option<Span> {
+        self.as_ref().map(|s| s.span())
     }
 }
 
@@ -620,6 +680,7 @@ pub enum TokenKind<'source> {
     Hid,
     Pub,
     Pre,
+    Help,
     Post,
     True,
     False,

@@ -1,12 +1,17 @@
 #![allow(dead_code)]
 use std::{
+    cmp,
     fmt::{Debug, Display},
     iter,
 };
 
+use derive_more::IsVariant;
 pub use fns_macros::Parse;
+use getset::{CopyGetters, Getters};
 
-use crate::tokenizer::{ParseBuffer, ParseToken, ParseTokenExt, Span, Token, TokenKind};
+pub use crate::tokenizer::{
+    ParseBuffer, ParseToken, ParseTokenExt, Span, Spanned, SpannedOption, Token, TokenKind,
+};
 
 #[macro_use]
 mod macros;
@@ -22,7 +27,7 @@ use self::{
     lisp::{Lisp, ToLisp},
 };
 
-mod expr;
+pub mod expr;
 
 const TAB: &str = "    ";
 
@@ -200,14 +205,14 @@ impl<T: Parse> Parse for Option<T> {
     }
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
 #[lisp(fns)]
 pub struct Script {
     pub doc: Option<ScriptDocComment>,
     pub fns: Vec<Function>,
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
 #[lisp(("fn" (vis name) args body))]
 pub struct Function {
     pub doc: Option<DocComment>,
@@ -224,8 +229,9 @@ pub struct Function {
     pub body: Vec<Statement>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Spanned)]
 pub struct ScriptDocComment {
+    #[span(ignored)]
     pub comment: String,
     span: Span,
 }
@@ -256,8 +262,9 @@ impl Parse for ScriptDocComment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Spanned)]
 pub struct DocComment {
+    #[span(ignored)]
     pub comment: String,
     span: Span,
 }
@@ -288,7 +295,7 @@ impl Parse for DocComment {
     }
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
 pub enum VisKind {
     Hid(Token![hid]),
     Pub(Token![pub]),
@@ -296,25 +303,20 @@ pub enum VisKind {
     Post(Token![post]),
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, IsVariant, Spanned)]
 pub enum Hook {
     All(Token![*]),
+    Help(Token![help]),
     Name(Ident),
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Spanned)]
 #[lisp((kind hooks))]
 pub struct Vis {
-    kind: Option<VisKind>,
-    paren: Option<Paren>,
-    hooks: Option<Vec<Hook>>,
     pub span: Span,
-}
-
-impl Vis {
-    pub fn is_pub(&self) -> bool {
-        matches!(self.kind, Some(VisKind::Pub(_)))
-    }
+    pub kind: Option<VisKind>,
+    pub paren: Option<Paren>,
+    pub hooks: Option<Vec<Hook>>,
 }
 
 impl Parse for Vis {
@@ -329,7 +331,7 @@ impl Parse for Vis {
                 let span = paren.span;
                 (
                     Some(paren),
-                    Some((&mut inner).parse_seperated_complete::<_, Token![,]>()?),
+                    Some(inner.parse_seperated_complete::<_, Token![,]>()?),
                     span,
                 )
             } else {
@@ -346,11 +348,12 @@ impl Parse for Vis {
     }
 }
 
-#[derive(Debug, ToLisp)]
+#[derive(Debug, ToLisp, Clone, Spanned)]
 #[lisp(name)]
 pub struct Ident {
-    name: String,
-    span: Span,
+    #[span(ignored)]
+    pub name: String,
+    pub span: Span,
 }
 
 impl Display for Ident {
@@ -374,18 +377,24 @@ impl Parse for Ident {
     }
 }
 
-#[derive(Debug, Parse, ToLisp)]
-#[lisp((":" name ty))]
-pub struct Argument {
-    name: Ident,
-    colon: Token![:],
-    ty: Type,
+impl cmp::PartialEq<str> for Ident {
+    fn eq(&self, other: &str) -> bool {
+        self.name == other
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
+#[lisp((":" name ty))]
+pub struct Argument {
+    pub name: Ident,
+    colon: Token![:],
+    pub ty: Type,
+}
+
+#[derive(Debug, Spanned)]
 pub struct Statement {
-    assignment: Option<Assignment>,
-    expr: Expr,
+    pub assignment: Option<Assignment>,
+    pub expr: Expr,
 }
 
 impl ToLisp for Statement {
@@ -409,13 +418,28 @@ impl Parse for Statement {
     }
 }
 
-#[derive(Debug, Parse)]
+#[derive(Debug, Parse, Spanned)]
 pub struct Assignment {
     vis: Option<Pub>,
-    let_: Let,
+    let_: Option<Let>,
     name: Ident,
     ty: Option<(Token![:], Type)>,
     assign: Eq,
+}
+
+impl Assignment {
+    pub fn is_pub(&self) -> bool {
+        self.vis.is_some()
+    }
+    pub fn is_let(&self) -> bool {
+        self.let_.is_some()
+    }
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+    pub fn ty(&self) -> Option<&Type> {
+        self.ty.map(|t| t.1).as_ref()
+    }
 }
 
 impl Parse for (Token![:], Type) {
@@ -430,14 +454,20 @@ impl ToLisp for (Token![:], Type) {
     }
 }
 
-#[derive(Debug, Parse, ToLisp)]
+impl Spanned for (Token![:], Type) {
+    fn span(&self) -> Span {
+        self.0.span() + self.1.span()
+    }
+}
+
+#[derive(Debug, Parse, ToLisp, Spanned)]
 pub enum Type {
     Struct(StructType),
     Selection(SelectionType),
     Path(Path),
 }
 
-#[derive(Debug, Parse)]
+#[derive(Debug, Parse, Spanned)]
 pub struct StructType {
     #[parse(inner = fields)]
     brace: Brace,
@@ -455,7 +485,7 @@ impl ToLisp for StructType {
     }
 }
 
-#[derive(Debug, Parse, ToLisp)]
+#[derive(Debug, Parse, ToLisp, Spanned)]
 #[lisp((in_ path expr))]
 pub struct SelectionType {
     path: Path,
@@ -463,10 +493,10 @@ pub struct SelectionType {
     expr: Expr,
 }
 
-#[derive(Debug, Parse)]
+#[derive(Debug, Parse, Spanned)]
 pub struct Path {
     #[parse(seperator = Token![::])]
-    segments: Vec<Ident>,
+    pub segments: Vec<Ident>,
 }
 
 impl ToLisp for Path {
